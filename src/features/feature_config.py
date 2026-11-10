@@ -37,6 +37,59 @@ FEATURES = [
 
 MODEL_FEATURES = [f["name"] for f in FEATURES]
 
+# --- Circular features -------------------------------------------------------
+# wind_direction and day_of_year are angles on a circle: 359 deg is one step
+# from 1 deg, and day 365 is one step from day 1. Treated as plain numbers
+# (what the committed models do) those neighbouring pairs look maximally far
+# apart, both to the model and to the OOD z-score check in reliability.py.
+#
+# CIRCULAR_ENCODING is OFF because models/xgb_ens_*.json were trained on the
+# linear features and expect exactly MODEL_FEATURES in that order. Flipping it
+# adds two columns, so it REQUIRES a retrain (train_model.py + build_shap.py)
+# and a fresh metadata.json before the API can serve it.
+CIRCULAR_ENCODING = False
+CIRCULAR_FEATURES = {"wind_direction": 360.0, "day_of_year": 365.0}
+
+
+def circular_terms(name, value):
+    """Return (sin, cos) for a circular feature, or None if it is not circular."""
+    import math
+
+    period = CIRCULAR_FEATURES.get(name)
+    if period is None or value is None:
+        return None
+    angle = 2.0 * math.pi * float(value) / period
+    return math.sin(angle), math.cos(angle)
+
+
+def active_features():
+    """Feature list the model is trained/served with, honouring CIRCULAR_ENCODING."""
+    if not CIRCULAR_ENCODING:
+        return list(MODEL_FEATURES)
+    out = []
+    for name in MODEL_FEATURES:
+        if name in CIRCULAR_FEATURES:
+            out += [f"{name}_sin", f"{name}_cos"]
+        else:
+            out.append(name)
+    return out
+
+
+def encode_row(row, names=None):
+    """Return a new row using the active feature names."""
+    names = names or active_features()
+    out = {}
+    for name in names:
+        if name.endswith("_sin") or name.endswith("_cos"):
+            base, part = name.rsplit("_", 1)
+            terms = circular_terms(base, row.get(base))
+            if terms is None:
+                continue
+            out[name] = terms[0] if part == "sin" else terms[1]
+        else:
+            out[name] = row.get(name)
+    return out
+
 # metadata columns carried along for analysis / spatial reference (NOT model inputs)
 META_COLUMNS = ["date", "latitude", "longitude", "rainfall_mm"]
 

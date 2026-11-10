@@ -8,13 +8,15 @@ One row per (date, grid cell) on the Konkan coast, with:
 import glob
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-RAIN_DIR = os.path.join("data", "raw", "imd_rainfall")
-ERA5_DIR = os.path.join("data", "raw", "era5_features")
+BASE = Path(__file__).resolve().parents[2]
+RAIN_DIR = str(BASE / "data" / "raw" / "imd_rainfall")
+ERA5_DIR = str(BASE / "data" / "raw" / "era5_features")
 
 THRESHOLD_MM = 64.5
 DEFAULT_REGION = "maharashtra_konkan"
@@ -22,7 +24,7 @@ DEFAULT_REGION = "maharashtra_konkan"
 
 def get_box():
     region = os.environ.get("REGION", DEFAULT_REGION)
-    with open("data/regions.json") as fh:
+    with open(BASE / "data" / "regions.json") as fh:
         available = json.load(fh)["regions"]
     if region not in available:
         raise SystemExit(f"Unknown region '{region}'. Choose from {list(available)}")
@@ -32,8 +34,8 @@ def get_box():
 
 
 BOX, REGION = get_box()
-OUT_CSV = os.path.join("data", "processed", f"rainfall_dataset.csv"
-                       if REGION == "maharashtra_konkan" else f"rainfall_dataset_{REGION}.csv")
+OUT_CSV = str(BASE / "data" / "processed" / (f"rainfall_dataset.csv"
+             if REGION == "maharashtra_konkan" else f"rainfall_dataset_{REGION}.csv"))
 
 FEATURE_RENAME = {
     "temperature_2m_mean": "temp_mean",

@@ -68,15 +68,25 @@ train 2001–2016 · val 2017–2018 · test 2019–2020 (no future leakage).
 ## Evaluation (test set)
 | Metric | Value | Meaning |
 |---|---|---|
-| ROC-AUC | 0.923 | Model ranks heavy vs normal days well |
+| Balanced accuracy | 0.923 | Mean of recall and specificity; the honest headline number |
 | Recall / POD | 0.915 | Catches 91.5% of real heavy-rain days |
 | Precision | 0.359 | 36% of "heavy" warnings are true |
 | F1 / CSI | 0.516 / 0.347 | Combined skill score |
 | FAR | 0.641 | False alarms are high (rare events) |
+| ROC-AUC / PR-AUC / Brier | pending | Not yet measured — see note below |
+
+**Correction (read this before quoting a number).** Earlier versions of this
+README listed "ROC-AUC 0.923". That value was **balanced accuracy mislabelled**:
+the training script passed hard 0/1 predictions to `roc_auc_score`, which then
+computed the mean of recall and specificity. The field is now `balanced_accuracy`
+in `models/metrics.json`; `roc_auc`, `pr_auc` and `brier` are explicitly `null`
+rather than guessed. `src/models/train_model.py` has been fixed to score
+probabilities, so a retrain fills in the real values.
 
 Heavy rain is rare (~2%), so high recall comes with false alarms — exactly why
-the reliability module exists. Metrics computed at a fixed 0.5 threshold; the
-threshold can be tuned for stricter/looser alerts.
+the reliability module exists. `models/metrics.json` also stores the threshold
+used; the shipped artifacts used a fixed 0.5, while a retrain picks the
+validation threshold that maximises CSI.
 
 ## XAI (SHAP)
 - **Global:** `models/global_shap.json` — mean |SHAP| per feature. Top drivers:
@@ -98,21 +108,34 @@ probability of correctness.
 
 ## API (FastAPI)
 ```bash
-.venv\Scripts\python.exe -m uvicorn api.app:app --port 8000
+python -m uvicorn api.app:app --port 8000
 ```
 | Endpoint | Purpose |
 |---|---|
 | `POST /predict` | weather JSON → prediction, probability, risk, reliability, SHAP explanation |
+| `GET /forecast?city=…` | live prediction for any city via Open-Meteo (no key) |
 | `GET /metrics` | model performance + global SHAP importance |
 | `GET /features` | feature definitions |
+| `GET /regions` | region/city registry |
 | `GET /` | web dashboard |
+
+`/predict` validates strictly: unknown fields, missing fields, strings, booleans
+and out-of-range values (e.g. humidity > 100) are rejected with HTTP 422 rather
+than silently coerced into a forecast.
 
 ### Live forecast — free Open-Meteo API (no key)
 `GET /forecast?city=Bhubaneswar` geocodes the city (free geocoding API), pulls
-**real-time** current weather (free forecast API), maps it to the model's 13
-features (dew point computed by Magnus formula), and returns prediction +
-reliability + SHAP. Open the dashboard → type any city → "Go". This makes the
-demo live with real weather, still fully free.
+**real-time** weather (free forecast API), maps it to the model's 13 features
+(dew point computed by Magnus formula), and returns prediction + reliability +
+SHAP. Open the dashboard → type any city → "Go". This makes the demo live with
+real weather, still fully free.
+
+The mapping uses the **same daily aggregates the model was trained on**
+(`temperature_2m_mean/max/min` from the daily block, `wind_speed_10m_max`,
+yesterday's `precipitation_sum` as `rain_lag1`, and the mean of today's 24 hourly
+wind speeds). An earlier version copied the current temperature into all three
+temperature slots — a train/serve mismatch that this fixes. Missing upstream
+values return HTTP 502 naming the field instead of crashing a `float(None)`.
 
 ### Multi-region support
 `data/regions.json` defines state/coast boxes: **Maharashtra (Konkan)**,
@@ -127,14 +150,22 @@ The currently trained/served model is the Konkan-coast one; the same pipeline
 retrains per region. Live forecast reuses it at any city as a demonstration.
 
 ## Frontend
-Single self-contained page (`frontend/index.html`, no build step, no CDN deps).
-Shows: prediction card, SHAP bar chart, reliability panel, model performance +
-confusion matrix, 3 demo input buttons (heavy day / normal day / unusual input),
-and a clearly-labelled **INSAT-3D/3DR Integration Ready** section.
+Three static pages sharing one `app.js` (no build step, no CDN deps):
+`index.html` (predict form + SHAP + reliability), `live.html` (live city
+forecast), `insights.html` (performance + global SHAP + methodology).
+The dashboard shows prediction card, SHAP bar chart, reliability panel, model
+performance + confusion matrix, 3 demo input buttons (heavy day / normal day /
+unusual input), and a clearly-labelled **INSAT-3D/3DR Integration Ready** section.
+
+Pages served by a plain static host (Vercel) cannot run Python, so they detect
+that the API is absent and fall back to **precomputed outputs** shipped as
+`frontend/demo_*.json`, labelled "HOSTED DEMO MODE" on screen. No live inference
+happens on the hosted site.
 
 ## Installation & run locally
 ```powershell
-cd C:\Users\radhi\rainfall-predictor
+git clone https://github.com/radhikasaxen22/heavy-rain-predictor.git
+cd heavy-rain-predictor
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.txt   # full dev stack (data + model + API)
@@ -155,6 +186,15 @@ python -m uvicorn api.app:app --port 8000
 # open http://127.0.0.1:8000
 ```
 
+All scripts resolve `models/`, `data/` and `frontend/` from the repository root
+rather than the current directory, so they can be invoked from anywhere.
+
+> **The training data is not in this repository.** `data/processed/**` is
+> gitignored, so the committed model artifacts run but cannot be retrained or
+> re-scored without first running the three download/build scripts above. That is
+> why `roc_auc`, `pr_auc` and `brier` are `null` in `models/metrics.json` until
+> someone retrains.
+
 Example API call:
 ```bash
 curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" ^
@@ -163,10 +203,13 @@ curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" ^
 
 ## Testing
 ```bash
-.\.venv\Scripts\python.exe -m pytest tests -q
+python -m pytest tests -q
 ```
-Covers heavy/normal/unusual cases, missing and non-numeric inputs, metrics,
-features and dashboard endpoints (8 tests).
+Covers heavy/normal/unusual cases, the response contract, real SHAP output,
+missing / non-numeric / boolean / out-of-range / unknown fields, the live
+`/forecast` mapping (with Open-Meteo mocked), the metrics honesty guard, features,
+regions and dashboard endpoints (22 tests). Tests pass from any working
+directory, which is the point: the original suite only passed from the repo root.
 
 ## Limitations
 - MVP is trained on **public IMD + ERA5 data**, not INSAT imagery.
@@ -176,6 +219,12 @@ features and dashboard endpoints (8 tests).
 - Precision is limited by the rarity of heavy rain; reliability flags (but
   cannot fix) uncertain cases.
 - Trained on the Konkan coast; performance elsewhere would need retraining.
+- `wind_direction` and `day_of_year` are angles treated as linear numbers by the
+  shipped models, so 359° and 1° look maximally different. `feature_config`
+  contains a sin/cos encoding behind the off-by-default `CIRCULAR_ENCODING` flag;
+  enabling it changes the feature count and **requires a retrain**.
+- The OOD check in `reliability.py` z-scores those same circular features
+  linearly and is documented as a known limitation until the flag is flipped.
 
 ## Future INSAT-3D/3DR integration
 Add satellite-derived columns (brightness temperature, cloud-top temperature,

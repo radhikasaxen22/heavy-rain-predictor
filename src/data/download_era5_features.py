@@ -10,10 +10,13 @@ import glob
 import json
 import os
 import time
+from pathlib import Path
 
 import numpy as np
 import requests
 import xarray as xr
+
+BASE = Path(__file__).resolve().parents[2]
 
 API_URL = "https://archive-api.open-meteo.com/v1/archive"
 START_DATE = "2001-01-01"
@@ -28,7 +31,7 @@ def get_box():
     """Region box from data/regions.json (Maharashtra / Odisha / Kerala ...).
     Choose with the REGION environment variable, e.g.  $env:REGION='odisha_coast'"""
     region = os.environ.get("REGION", DEFAULT_REGION)
-    with open("data/regions.json") as fh:
+    with open(BASE / "data" / "regions.json") as fh:
         available = json.load(fh)["regions"]
     if region not in available:
         raise SystemExit(f"Unknown region '{region}'. Choose from {list(available)}")
@@ -39,8 +42,8 @@ def get_box():
 
 BOX, REGION = get_box()
 
-RAIN_DIR = os.path.join("data", "raw", "imd_rainfall")
-OUT_DIR = os.path.join("data", "raw", "era5_features")
+RAIN_DIR = str(BASE / "data" / "raw" / "imd_rainfall")
+OUT_DIR = str(BASE / "data" / "raw" / "era5_features")
 
 DAILY_VARS = [
     "temperature_2m_mean",

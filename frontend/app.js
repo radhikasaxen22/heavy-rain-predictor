@@ -4,7 +4,18 @@ const FEATURES = ["relative_humidity","cloud_cover","dew_point","surface_pressur
 
 let IS_LOCAL = true;
 
-function esc(s){ return String(s).replace(/&/g,"&").replace(/</g,"<"); }
+// Real HTML escaping. The previous version "replaced" & with & and < with <,
+// i.e. it escaped nothing and returned its input untouched.
+function esc(s){
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[c]);
+}
+
+// A metric we do not actually have must render as "-", never as NaN or a crash.
+function num(v, digits){
+  return (typeof v === "number" && isFinite(v)) ? v.toFixed(digits === undefined ? 3 : digits) : "&mdash;";
+}
 
 function liveHeuristic(f){
   let score = 0, why = [];
@@ -15,7 +26,11 @@ function liveHeuristic(f){
   return { score, why };
 }
 
+  applyResult(d);
+}
+
 function applyResult(d){
+  if (typeof d.heavy_rain_threshold_mm === "number") window.HEAVY_MM = d.heavy_rain_threshold_mm;
   document.getElementById("risk").textContent = d.risk_level + " RISK";
   document.getElementById("risk").className = "risk " + d.risk_level;
   document.getElementById("prob").innerHTML = (d.probability*100).toFixed(0) + "<small>%</small>";
@@ -62,13 +77,24 @@ async function loadMetrics(){
     d = await (await fetch("/frontend/demo_metrics.json")).json();
   }
   const m = d.metrics.test;
-  const rows = [["Accuracy", m.accuracy], ["Precision", m.precision], ["Recall", m.recall],
-    ["F1-score", m.f1], ["ROC-AUC", m.roc_auc], ["POD", m.pod], ["FAR", m.far], ["CSI", m.csi]];
+  // 'roc_auc' used to hold balanced accuracy mislabelled; it is now null until
+  // the model is retrained. Render what we can prove, dash the rest.
+  const rows = [["Balanced accuracy", m.balanced_accuracy], ["Recall (POD)", m.recall],
+    ["Precision", m.precision], ["F1-score", m.f1], ["CSI", m.csi],
+    ["FAR", m.far], ["Specificity", m.specificity], ["Accuracy", m.accuracy],
+    ["ROC-AUC", m.roc_auc], ["PR-AUC", m.pr_auc], ["Brier", m.brier]];
   const perfTable = document.getElementById("perfTable");
   if (perfTable) {
     perfTable.innerHTML = rows.map(r =>
-      `<tr><td>${r[0]}</td><td class="num">${r[1].toFixed(3)}</td></tr>`).join("")
+      `<tr><td>${r[0]}</td><td class="num">${num(r[1])}</td></tr>`).join("")
       + `<tr><td>Samples</td><td class="num">${m.n.toLocaleString()} (${m.n_heavy.toLocaleString()} heavy)</td></tr>`;
+  }
+  const perfNote = document.getElementById("perfNote");
+  if (perfNote) {
+    perfNote.innerHTML = "Balanced accuracy = mean of recall and specificity; on " +
+      (100 * m.n_heavy / m.n).toFixed(1) + "% positives, plain accuracy is dominated by " +
+      "the majority class. ROC-AUC, PR-AUC and Brier need saved probabilities and are " +
+      "pending a retrain (&mdash; means not yet measured, not zero).";
   }
   const cm = m.confusion_matrix;
   const cmTable = document.getElementById("cmTable");
@@ -125,8 +151,11 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 window.FEATURES = FEATURES;
-window.IS_LOCAL = IS_LOCAL;
-window.esc = esc;
+// A plain assignment copied the initial `true` and never updated, so anything
+// reading window.IS_LOCAL saw "local" forever. A getter always reports the truth.
+Object.defineProperty(window, "IS_LOCAL", { get: () => IS_LOCAL });
+Object.defineProperty(window, "esc", { value: esc });
+Object.defineProperty(window, "num", { value: num });
 window.liveHeuristic = liveHeuristic;
 window.applyResult = applyResult;
 window.drawShap = drawShap;

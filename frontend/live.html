@@ -124,19 +124,20 @@ function drawForecastChart(daily){
   const container = document.getElementById("forecastChart");
   if (!daily || !daily.precipitation_sum) { container.innerHTML = '<div class="note">No forecast data available</div>'; return; }
   const labels = daily.time;
-  const values = daily.precipitation_sum;
+  const values = (daily.precipitation_sum || []).map(v => (v == null ? 0 : v));
+  const heavyMm = window.HEAVY_MM || 64.5;
   const max = Math.max(...values, 1);
   let html = '<div style="display:flex;gap:8px;align-items:flex-end;height:180px;padding:10px 0">';
   labels.forEach((date, i) => {
     const h = (values[i]/max)*160;
-    const isHeavy = values[i] > 50;
+    const isHeavy = values[i] > heavyMm;
     html += `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
       <div style="width:100%;height:${h}px;background:${isHeavy?'var(--red)':'var(--primary)'};border-radius:4px 4px 0 0;transition:height 0.3s"></div>
       <span style="font-size:10px;color:var(--mut)">${date.slice(5)}</span>
       <span style="font-size:11px;font-weight:600;color:${isHeavy?'var(--red)':'var(--txt)'}">${values[i].toFixed(1)}mm</span>
     </div>`;
   });
-  html += '</div><div class="note">Bars show daily precipitation sum (mm). Red = heavy rain threshold (>50mm).</div>';
+  html += '</div><div class="note">Bars show daily precipitation sum (mm). Red = above the model\'s heavy-rain threshold (' + heavyMm + ' mm/day).</div>';
   container.innerHTML = html;
 }
 </script>

@@ -4,10 +4,14 @@
     "heavy_rain_threshold_mm": 64.5,
     "val": {
       "accuracy": 0.9421451471874089,
+      "balanced_accuracy": 0.9258057258324701,
+      "specificity": 0.9427968619992868,
       "precision": 0.23701942132382084,
       "recall": 0.9088145896656535,
       "f1": 0.3759823954731217,
-      "roc_auc": 0.9258057258324702,
+      "roc_auc": null,
+      "pr_auc": null,
+      "brier": null,
       "pod": 0.9088145896656535,
       "far": 0.7629805786761792,
       "csi": 0.23151374370886565,
@@ -22,10 +26,14 @@
     },
     "test": {
       "accuracy": 0.930465407340571,
+      "balanced_accuracy": 0.9231104223909979,
+      "specificity": 0.9311129311129311,
       "precision": 0.3590177815410669,
       "recall": 0.9151079136690647,
       "f1": 0.5157105209811473,
-      "roc_auc": 0.9231104223909979,
+      "roc_auc": null,
+      "pr_auc": null,
+      "brier": null,
       "pod": 0.9151079136690647,
       "far": 0.6409822184589331,
       "csi": 0.3474460529909861,
@@ -37,7 +45,9 @@
       },
       "n": 34357,
       "n_heavy": 1390
-    }
+    },
+    "threshold_source": "fixed 0.5; train_model.py selects it on validation after retrain",
+    "metrics_note": "balanced_accuracy = (recall + specificity) / 2 and is recomputed from the shipped confusion matrices. The old 'roc_auc' field held this same number (0.9231 test) and was mislabelled: it is NOT the area under the ROC curve. roc_auc, pr_auc and brier are null because the trained artifacts saved only binary predictions and the dataset split is not in this repository; they are populated the next time src/models/train_model.py runs."
   },
   "global_shap": {
     "base_value": 0.10206785798072815,

@@ -23,9 +23,9 @@ Setup: server already running, dashboard open in fullscreen, desktop clean.
 ## 1:30 — Model (30 s)
 > "XGBoost ensemble of 3 seeds — fast, CPU-only, SHAP-compatible. Time-aware
 > split (train 2001–2016, val 2017–18, test 2019–20) so the model never sees
-> the future. Test results: **ROC-AUC 0.92, catches 91.5% of real heavy-rain
-> days.** Precision is lower (~36%) because heavy rain is rare — that's why
-> reliability matters."
+> the future. Test results: **balanced accuracy 0.92, catches 91.5% of real
+> heavy-rain days.** Precision is lower (~36%) because heavy rain is rare —
+> that's why reliability matters."
 
 ## 2:00 — LIVE: Heavy-rain case (45 s)
 > 1. Click **"Heavy rain case"**.
@@ -47,8 +47,10 @@ Setup: server already running, dashboard open in fullscreen, desktop clean.
 > 3. Show the reliability method line: probability + OOD check + ensemble agreement.
 
 ## 4:00 — Model performance (30 s)
-> *"Table: precision, recall, F1, ROC-AUC, plus meteorology scores POD/FAR/CSI
-> and the confusion matrix on the held-out test set."*
+> *"Table: balanced accuracy, precision, recall, F1, specificity, plus
+> meteorology scores POD/FAR/CSI and the confusion matrix on the held-out test
+> set. ROC-AUC and PR-AUC are shown as pending - we do not quote a number we
+> have not measured."*
 
 ## 4:30 — INSAT future + close (30 s)
 > *"Everything is INSAT-ready: satellite features (brightness temperature,
@@ -65,5 +67,5 @@ Setup: server already running, dashboard open in fullscreen, desktop clean.
 - **Is this a forecast?** It's a same-day diagnostic; a 1-day-ahead variant = shift features back 1 day (documented in README).
 - **Why 64.5 mm?** IMD's own "Very Heavy Rain" category boundary.
 - **Data leakage?** Time-first split + only previous-day rainfall as lag — no future info.
-- **What's the accuracy?** 93%; but for rare events AUC/recall/POD matter more — we report all of them.
+- **What's the accuracy?** Balanced accuracy 92.3% (recall 91.5%, specificity 93.1%). Plain accuracy is 93% but that is flattered by the 98% majority class, so we lead with balanced accuracy and POD/CSI.
 - **How would INSAT help?** Real-time satellite features → faster, wider, satellite-based inputs to the same pipeline.

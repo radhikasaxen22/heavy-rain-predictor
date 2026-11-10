@@ -26,12 +26,19 @@
 ## Slide 5 — Results (held-out test 2019–2020)
 | Metric | Value |
 |---|---|
-| ROC-AUC | **0.923** |
+| Balanced accuracy | **0.923** |
 | Recall / POD | **0.915** |
 | Precision | 0.359 |
+| Specificity | 0.931 |
 | F1 | 0.516 |
 | CSI | 0.347 |
 | FAR | 0.641 |
+| ROC-AUC / PR-AUC / Brier | pending retrain |
+
+Balanced accuracy = mean of recall and specificity. An earlier version of this
+slide called it "ROC-AUC"; that was a mislabel, since the training script scored
+hard 0/1 predictions instead of probabilities. The metric is now named correctly,
+and ROC-AUC/PR-AUC/Brier are listed as pending rather than estimated.
 
 Key message: catches **91.5%** of real heavy-rain days; false alarms are visible
 and **flagged** by the reliability module, not hidden.

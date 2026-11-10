@@ -8,12 +8,15 @@ We download one file per year for 2001-2020 into data/raw/imd_rainfall/.
 """
 import os
 import time
+from pathlib import Path
 
 import requests
 
+BASE = Path(__file__).resolve().parents[2]
+
 YEARS = list(range(2001, 2021))
 POST_URL = "https://www.imdpune.gov.in/cmpg/Griddata/RF25.php"
-OUT_DIR = os.path.join("data", "raw", "imd_rainfall")
+OUT_DIR = str(BASE / "data" / "raw" / "imd_rainfall")
 
 
 def main():

@@ -9,11 +9,27 @@ Disclaimer: this is a heuristic confidence indicator, NOT a scientifically
 calibrated probability of correctness.
 """
 import json
-import os
+from pathlib import Path
+
+MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
+
+# metadata.json is immutable at runtime; read it once per process, not per request.
+_META = None
 
 
-def confidence_from_prob(p):
-    conf = abs(p - 0.5) / 0.5
+def load_metadata(path=None):
+    """Load (and cache) models/metadata.json, independent of the current directory."""
+    global _META
+    if _META is None:
+        with open(path or MODELS_DIR / "metadata.json") as fh:
+            _META = json.load(fh)
+    return _META
+
+
+def confidence_from_prob(p, threshold=0.5):
+    """Distance of p from the decision boundary, normalised to the wider half."""
+    span = threshold if p < threshold else 1.0 - threshold
+    conf = abs(p - threshold) / span if span else 0.0
     if conf >= 0.6:
         return "HIGH"
     if conf >= 0.3:
@@ -22,7 +38,14 @@ def confidence_from_prob(p):
 
 
 def ood_assessment(row, meta):
-    """Standardised deviation of each feature from the training distribution."""
+    """Standardised deviation of each feature from the training distribution.
+
+    NOTE: wind_direction and day_of_year are circular and are z-scored here as
+    ordinary numbers, so a 359 deg / 1 deg boundary and a Dec-31 / Jan-1 boundary
+    look like large deviations. Treating them as linear is a known limitation;
+    see feature_config.circular_features for the sin/cos encoding that fixes it
+    once the model is retrained.
+    """
     zs = []
     for feature in meta["model_features"]:
         if feature not in row or row[feature] is None:
@@ -39,12 +62,11 @@ def ood_assessment(row, meta):
     return mean_z, bool(flag)
 
 
-def assess(row, prob, ensemble_std=None):
-    with open(os.path.join("models", "metadata.json")) as fh:
-        meta = json.load(fh)
+def assess(row, prob, ensemble_std=None, meta=None, threshold=0.5):
+    meta = meta if meta is not None else load_metadata()
 
     ood_score, ood_flag = ood_assessment(row, meta)
-    confidence = confidence_from_prob(prob)
+    confidence = confidence_from_prob(prob, threshold)
     reasons = []
 
     if ensemble_std is not None:
@@ -64,12 +86,13 @@ def assess(row, prob, ensemble_std=None):
 
     return {
         "probability": round(float(prob), 4),
-        "prediction": int(prob >= 0.5),
-        "label": "HEAVY RAINFALL" if prob >= 0.5 else "NO HEAVY RAINFALL",
+        "prediction": int(prob >= threshold),
+        "label": "HEAVY RAINFALL" if prob >= threshold else "NO HEAVY RAINFALL",
         "confidence": confidence,
         "ood_score": round(float(ood_score), 3),
         "ood_flag": bool(ood_flag),
         "reliability": confidence,
+        "threshold": float(threshold),
         "reasons": reasons,
         "disclaimer": "Reliability is a heuristic confidence indicator, not a "
                       "scientifically calibrated probability of correctness.",

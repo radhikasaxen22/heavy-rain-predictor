@@ -14,16 +14,17 @@ Output: data/processed/split/{train,val,test}.csv  (features + target + metadata
 """
 import json
 import os
+import sys
+from pathlib import Path
 
 import pandas as pd
 
-import sys
-
-sys.path.insert(0, os.path.join("src"))
+BASE = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(BASE / "src"))
 from features.feature_config import MODEL_FEATURES, META_COLUMNS, RAIN_COL, TARGET  # noqa: E402
 
-DATASET_CSV = os.path.join("data", "processed", "rainfall_dataset.csv")
-SPLIT_DIR = os.path.join("data", "processed", "split")
+DATASET_CSV = BASE / "data" / "processed" / "rainfall_dataset.csv"
+SPLIT_DIR = BASE / "data" / "processed" / "split"
 
 TRAIN_END = "2016-12-31"
 VAL_END = "2018-12-31"

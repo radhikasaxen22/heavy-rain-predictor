@@ -1,51 +1,65 @@
 """Phase 4: Global SHAP feature importance.
 
-Loads a sample of training data, computes SHAP values with the first ensemble
-member, and saves the global feature importance to models/global_shap.json.
+Loads a sample of the training split, computes SHAP values for EVERY ensemble
+member, and saves the mean absolute attribution across members to
+models/global_shap.json. Averaging matters: the API predicts with the ensemble,
+so importance from member 0 alone misrepresented what the service does.
 """
 import json
-import os
+import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import shap
 import xgboost as xgb
 
-import sys
+BASE = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(BASE / "src"))
+from features.feature_config import TARGET, active_features  # noqa: E402
+from models.train_model import SEEDS, expand  # noqa: E402
 
-sys.path.insert(0, os.path.join("src"))
-from features.feature_config import MODEL_FEATURES, TARGET  # noqa: E402
-
-SPLIT_DIR = os.path.join("data", "processed", "split")
-MODEL_PATH = os.path.join("models", "xgb_ens_0.json")
-OUT = os.path.join("models", "global_shap.json")
+SPLIT_DIR = BASE / "data" / "processed" / "split"
 SAMPLE = 20000
 
 
 def main():
-    train = pd.read_csv(os.path.join(SPLIT_DIR, "train.csv"))
+    names = active_features()
+    train = pd.read_csv(SPLIT_DIR / "train.csv")
     pos = train[train[TARGET] == 1]
-    neg = train[train[TARGET] == 0].sample(n=min(len(pos) * 5, SAMPLE - len(pos)), random_state=1)
+    neg = train[train[TARGET] == 0].sample(
+        n=min(len(pos) * 5, SAMPLE - len(pos)), random_state=1)
     sample = pd.concat([pos, neg]).sample(frac=1, random_state=1).reset_index(drop=True)
-    X = sample[MODEL_FEATURES]
+    X = expand(sample, names)
     print(f"[sample] {len(X)} rows ({int(sample[TARGET].sum())} heavy)")
 
-    model = xgb.XGBClassifier()
-    model.load_model(MODEL_PATH)
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(X, check_additivity=False)
+    per_member = []
+    base_values = []
+    for i, seed in enumerate(SEEDS):
+        model = xgb.XGBClassifier()
+        model.load_model(str(BASE / "models" / f"xgb_ens_{i}.json"))
+        explainer = shap.TreeExplainer(model)
+        values = explainer.shap_values(X, check_additivity=False)
+        per_member.append(values)
+        base_values.append(float(np.ravel(explainer.expected_value)[0]))
+        print(f"[shap] member {i} (seed {seed}) done")
 
+    shap_values = np.mean(per_member, axis=0)
     imp = np.abs(shap_values).mean(axis=0)
-    rows = [{"feature": f, "importance": float(v)} for f, v in zip(MODEL_FEATURES, imp)]
+    rows = [{"feature": f, "importance": float(v)} for f, v in zip(names, imp)]
     rows.sort(key=lambda r: r["importance"], reverse=True)
 
-    with open(OUT, "w") as fh:
-        json.dump({"base_value": float(explainer.expected_value), "importance": rows}, fh, indent=2)
+    out = BASE / "models" / "global_shap.json"
+    out.write_text(json.dumps({
+        "base_value": float(np.mean(base_values)),
+        "members_averaged": len(SEEDS),
+        "importance": rows,
+    }, indent=2) + "\n")
 
-    print("== global feature importance (mean |SHAP|) ==")
+    print("== global feature importance (mean |SHAP| across ensemble) ==")
     for r in rows:
-        print(f"  {r['feature']:<20} {r['importance']:.4f}")
-    print(f"[saved] {OUT}")
+        print(f"  {r['feature']:<22} {r['importance']:.4f}")
+    print(f"[saved] {out}")
 
 
 if __name__ == "__main__":

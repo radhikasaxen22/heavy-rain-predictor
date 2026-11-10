@@ -56,9 +56,10 @@ def main():
               f"({part[TARGET].mean() * 100:.2f}%)")
         part.to_csv(os.path.join(SPLIT_DIR, f"{name}.csv"), index=False)
 
-    with open(os.path.join("src", "features", "model_features.json"), "w") as fh:
+    manifest = BASE / "src" / "features" / "model_features.json"
+    with open(manifest, "w") as fh:
         json.dump(MODEL_FEATURES, fh, indent=2)
-    print("  saved split CSVs + model_features.json")
+    print(f"  saved split CSVs + {manifest.name}")
 
 
 if __name__ == "__main__":

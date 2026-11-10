@@ -90,6 +90,18 @@ FEATURE_INFO = {f["name"]: f for f in FEATURES}
 # Threshold chosen during training (validation set); 0.5 for older artefacts.
 THRESHOLD = float(_metrics.get("threshold_prediction", 0.5))
 
+
+def _disclaimer():
+    """State the data window the served model actually saw, not a stale constant."""
+    start = _metadata.get("date_min")
+    end = _metadata.get("date_max")
+    if start and end:
+        window = f"{str(start)[:4]}-{str(end)[:4]}"
+    else:
+        window = "public IMD/ERA5"
+    return (f"Prototype built on public IMD/ERA5 data ({window}, Konkan coast). "
+            "Not an operational ISRO forecasting system.")
+
 WMO_CODES = {0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
              45: "Fog", 48: "Fog", 51: "Drizzle", 53: "Drizzle", 55: "Drizzle",
              61: "Light rain", 63: "Rain", 65: "Heavy rain", 66: "Freezing rain",
@@ -373,8 +385,7 @@ def predict(payload: WeatherInput):
         "explanation": _build_explanation(row),
         "model_agreement_std": round(std, 4),
         "heavy_rain_threshold_mm": _metrics["heavy_rain_threshold_mm"],
-        "disclaimer": "Prototype built on public IMD/ERA5 data (2001-2020, Konkan "
-                      "coast). Not an operational ISRO forecasting system.",
+        "disclaimer": _disclaimer(),
     }
 
 

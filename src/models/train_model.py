@@ -192,6 +192,11 @@ def main():
         "scale_pos_weight": float(scale_pos_weight),
         "n_train": int(len(X_tr)),
         "circular_encoding": bool(CIRCULAR_ENCODING),
+        "date_min": str(pd.to_datetime(train["date"]).min().date()),
+        "date_max": str(pd.to_datetime(test["date"]).max().date()),
+        "n_grid_cells": int(
+            pd.concat([train, val, test])[["latitude", "longitude"]].drop_duplicates().shape[0]
+        ),
         "feature_mean": {c: float(X_tr[c].mean()) for c in names},
         "feature_std": {c: float(X_tr[c].std()) for c in names},
     }

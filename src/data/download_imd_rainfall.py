@@ -36,8 +36,10 @@ def main():
         if len(resp.content) < 1_000_000:
             print(f"[warn] {year}: response only {len(resp.content)} bytes, skipping")
             continue
-        with open(out_path, "wb") as handle:
+        part_path = out_path + ".part"
+        with open(part_path, "wb") as handle:
             handle.write(resp.content)
+        os.replace(part_path, out_path)
         print(f"[ok] {year}: {len(resp.content) / 1e6:.1f} MB")
         time.sleep(1)
 

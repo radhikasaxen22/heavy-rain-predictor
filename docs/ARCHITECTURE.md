@@ -8,14 +8,14 @@
 flowchart TB
     subgraph DATA["DATA (free, public)"]
         A1[IMD 0.25° daily gridded<br/>rainfall 2001-2020<br/>(target)]
-        A2[ERA5 atmosphere via<br/>Open-Meteo archive API<br/>(13 features, daily)]
+        A2[ERA5 atmosphere, daily<br/>via Open-Meteo or CDS<br/>(13 features)]
     end
 
     B["Preprocessing & merge<br/>src/data/build_dataset.py"]
     C["Feature registry<br/>src/features/feature_config.py"]
-    D["Time-aware split<br/>train 2001-16 · val 17-18 · test 19-20"]
+    D["Time-aware split<br/>2011-2020: train 11-16 · val 17-18 · test 19-20"]
 
-    E["XGBoost ensemble (3 seeds)<br/>scale_pos_weight ~48:1"]
+    E["XGBoost ensemble (3 seeds)<br/>scale_pos_weight ≈50:1"]
     F["SHAP explainer<br/>global + local attributions"]
     G["Reliability module<br/>prob · OOD check · disagreement"]
 

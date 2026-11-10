@@ -20,11 +20,11 @@ XAI → RELIABILITY → API → WEB DASHBOARD**
 
 ## System architecture
 ```
-IMD 0.25° daily rainfall (target)   ERA5 atmosphere via Open-Meteo (features)
+IMD 0.25° daily rainfall (target)   ERA5 atmosphere, daily aggregates (features)
           │                                      │
           └──────────────┬───────────────────────┘
                  data/processed/rainfall_dataset.csv
-                 time-aware train/val/test split (2001–2020, Konkan coast)
+                 time-aware train/val/test split (2011–2020, Konkan coast)
                  XGBoost ensemble (3 seeds) -> SHAP -> reliability
                           │
                    FastAPI  (/predict /metrics /features)
@@ -35,15 +35,27 @@ IMD 0.25° daily rainfall (target)   ERA5 atmosphere via Open-Meteo (features)
 ## Dataset
 | Role | Source | Detail | Cost |
 |---|---|---|---|
-| **Target** | IMD 0.25° daily gridded rainfall (Pai et al. 2014) | Gauge-based, India, 2001–2020 | Free |
-| **Features** | ERA5 reanalysis via Open-Meteo archive API | 0.25°, daily aggregations | Free, no key |
+| **Target** | IMD 0.25° daily gridded rainfall (Pai et al. 2014) | Gauge-based, India, 2001–2020 on disk; merged window 2011–2020 | Free |
+| **Features** | ERA5 reanalysis, 0.25°, daily aggregations | Via Open-Meteo archive API (keyless) or Copernicus CDS | Free |
 
-Region: **Konkan coast** latitudes 15.5–20.0 °N (Mumbai→Goa), so heavy-rain events
-are common enough to learn from. Final dataset: **343,294 rows · 41 grid cells ·
-2001-01-01 → 2020-12-31 · heavy-rain days 2.24%**.
+Region: **Konkan coast**, 15.5–20.0 °N × 72.5–74.5 °E (Mumbai→Goa), so heavy-rain
+events are common enough to learn from. That box is 171 grid points at 0.25°, of
+which **131 have usable IMD coverage** (≥90% of days non-null) and 40 are sea or
+sparse. The rebuild samples **36 cells** (every second cell in both directions)
+over **2011-01-01 → 2020-12-31**: the Open-Meteo free tier refuses a larger
+request outright and rate-limits long runs, so the full 131-cell × 20-year pull is
+not reachable without a paid key. Sampling on a regular stride keeps spatial
+coverage of the strip instead of clustering on one end.
 
-Origin scripts: `src/data/download_imd_rainfall.py`, `download_era5_features.py`,
-`build_dataset.py` (all resumable — rerun them to add more cells/years).
+Row count and heavy-rain prevalence are **measured**, not asserted here:
+`build_dataset.py` prints them and `train_model.py` records the window, cell count
+and row count in `models/metadata.json`. The same file drives the API's
+data-window disclaimer, so the served claim cannot drift from the trained facts.
+
+Origin scripts: `src/data/download_imd_rainfall.py`,
+`download_era5_features.py` (Open-Meteo, default), `download_era5_cds.py`
+(same features straight from CDS; needs a free key, no quota — see its docstring),
+`build_dataset.py`. All are resumable and skip work already on disk.
 
 ## Target definition
 `1` if IMD daily rainfall **> 64.5 mm** else `0`. 64.5 mm is IMD's own "Very
@@ -61,9 +73,10 @@ nowcast** rather than a true 24 h forecast — this is documented in Limitations
 
 ## Model
 **XGBoost** binary classifier (CPU-friendly, SHAP-compatible). Class imbalance
-handled with `scale_pos_weight` (~48:1). An **ensemble of 3 seeds** gives mean
-probability + disagreement signal. Time-aware split:
-train 2001–2016 · val 2017–2018 · test 2019–2020 (no future leakage).
+handled with `scale_pos_weight` set from the observed prevalence at training time
+(≈50:1 on this window; the exact value is in `models/metadata.json`). An
+**ensemble of 3 seeds** gives mean probability + disagreement signal. Time-aware
+split: train 2011–2016 · val 2017–2018 · test 2019–2020 (no future leakage).
 
 ## Evaluation (test set)
 | Metric | Value | Meaning |
@@ -82,6 +95,12 @@ computed the mean of recall and specificity. The field is now `balanced_accuracy
 in `models/metrics.json`; `roc_auc`, `pr_auc` and `brier` are explicitly `null`
 rather than guessed. `src/models/train_model.py` has been fixed to score
 probabilities, so a retrain fills in the real values.
+
+The table above describes the artifacts currently in `models/`, which were trained
+before the reduced-scope rebuild and will be replaced when it lands. Their own row
+counts also contradict the "41 grid cells" this README used to claim: validation
+covers 34,310 rows over two years, i.e. ≈47 cells × 365 days. The old cell count
+was wrong; the row count was right.
 
 Heavy rain is rare (~2%), so high recall comes with false alarms — exactly why
 the reliability module exists. `models/metrics.json` also stores the threshold

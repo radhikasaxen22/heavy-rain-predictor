@@ -5,6 +5,12 @@ https://open-meteo.com/en/docs/historical-weather-api  (no API key needed)
 
 We only fetch the grid cells that have real IMD land data (the Konkan
 coastal strip). Each cell becomes one small JSON file in data/raw/era5_features/.
+
+Free-tier scope: Open-Meteo refuses a request covering 15 cells x 11 variables x
+20 years as "too much data", and the keyless tier rate-limits long runs. The
+defaults below are the practical free scope (2011-2020, every 2nd cell). Widen
+them with ERA5_START, ERA5_END and ERA5_CELL_STRIDE once you have a paid key;
+build_dataset.py merges with an inner join, so it adapts to whatever is present.
 """
 import glob
 import json
@@ -19,12 +25,21 @@ import xarray as xr
 BASE = Path(__file__).resolve().parents[2]
 
 API_URL = "https://archive-api.open-meteo.com/v1/archive"
-START_DATE = "2001-01-01"
-END_DATE = "2020-12-31"
+START_DATE = os.environ.get("ERA5_START", "2011-01-01")
+END_DATE = os.environ.get("ERA5_END", "2020-12-31")
+CELL_STRIDE = max(1, int(os.environ.get("ERA5_CELL_STRIDE", "2")))
 
 DEFAULT_REGION = "maharashtra_konkan"
 VALID_FRACTION = 0.9
 MASK_YEARS = [2001, 2005, 2010, 2015, 2019]
+
+# Open-Meteo rejects a request as "too much data" above roughly this many
+# (locations x variables x days) units; 15 cells x 11 variables was refused,
+# 15 x 4 was accepted. Stay well under it and split further if still refused.
+COST_BUDGET = 40
+PAUSE_SECONDS = 8
+
+_TOO_BIG = object()
 
 
 def get_box():
@@ -82,6 +97,8 @@ def find_land_cells():
     cells = []
     for i in range(n_lat):
         for j in range(n_lon):
+            if i % CELL_STRIDE or j % CELL_STRIDE:
+                continue
             if frac[i, j] >= VALID_FRACTION:
                 lat = round(BOX["lat"][0] + i * 0.25, 2)
                 lon = round(BOX["lon"][0] + j * 0.25, 2)
@@ -89,21 +106,40 @@ def find_land_cells():
     return cells
 
 
-def fetch_with_retry(params, max_attempts=6):
-    """GET the archive API, backing off politely when rate-limited (HTTP 429)."""
-    for attempt in range(1, max_attempts + 1):
+def fetch_with_retry(params, max_attempts=6, max_rate_limit_waits=12):
+    """GET the archive API, honouring Retry-After when rate-limited.
+
+    A 429 can ask for 20+ minutes of cooldown. Counting that as a failed attempt
+    gives up after a handful of hours of waiting, so cooldowns are tracked
+    separately from genuine failures.
+    """
+    failures = 0
+    cooldowns = 0
+    while failures < max_attempts:
         try:
             resp = requests.get(API_URL, params=params, timeout=300)
             if resp.status_code == 429:
-                wait = int(resp.headers.get("Retry-After", 2 ** attempt))
+                cooldowns += 1
+                if cooldowns > max_rate_limit_waits:
+                    print("    ...too many rate-limit cooldowns, giving up")
+                    return None
+                wait = int(resp.headers.get("Retry-After", 60))
+                if os.environ.get("ERA5_EXIT_ON_RATE_LIMIT"):
+                    # Caller retries later (e.g. a scheduler); do not sit in a
+                    # 14-hour sleep that a login session or job object can kill.
+                    print(f"    ...rate limited for {wait}s, exiting so a later run can retry")
+                    raise SystemExit(3)
                 print(f"    ...rate limited, waiting {wait}s")
-                time.sleep(wait)
+                time.sleep(wait + 1)
                 continue
+            if resp.status_code == 400 and "too much data" in resp.text:
+                return _TOO_BIG
             resp.raise_for_status()
             return resp.json()
         except requests.RequestException as exc:
-            if attempt < max_attempts:
-                time.sleep(2 ** attempt)
+            failures += 1
+            if failures < max_attempts:
+                time.sleep(2 ** failures)
             else:
                 print(f"    ...{exc}")
     return None
@@ -125,6 +161,30 @@ def save_cell(data):
     return True
 
 
+def fetch_cells(cells):
+    """Fetch one batch; halve it if the API still says the request is too large."""
+    params = {
+        "latitude": ",".join(str(c[0]) for c in cells),
+        "longitude": ",".join(str(c[1]) for c in cells),
+        "start_date": START_DATE,
+        "end_date": END_DATE,
+        "daily": ",".join(DAILY_VARS),
+        "timezone": "Asia/Kolkata",
+        "models": "era5",
+    }
+    data = fetch_with_retry(params)
+    if data is _TOO_BIG:
+        if len(cells) == 1:
+            print(f"[error] single cell still too large: {cells[0]}")
+            return []
+        mid = len(cells) // 2
+        print(f"    ...too much data, splitting {len(cells)} cells into {mid}+{len(cells) - mid}")
+        return fetch_cells(cells[:mid]) + fetch_cells(cells[mid:])
+    if data is None:
+        return []
+    return data if isinstance(data, list) else [data]
+
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     cells = find_land_cells()
@@ -133,29 +193,16 @@ def main():
         for lat, lon in cells
         if not os.path.exists(os.path.join(OUT_DIR, f"era5_{lat:.2f}_{lon:.2f}.json"))
     ]
-    print(f"[plan] {len(todo)}/{len(cells)} cells still to fetch")
+    batch_size = max(1, COST_BUDGET // len(DAILY_VARS))
+    print(f"[plan] {len(todo)}/{len(cells)} cells still to fetch, {batch_size} per request")
 
-    BATCH = 15
-    for i in range(0, len(todo), BATCH):
-        batch = todo[i : i + BATCH]
-        params = {
-            "latitude": ",".join(str(c[0]) for c in batch),
-            "longitude": ",".join(str(c[1]) for c in batch),
-            "start_date": START_DATE,
-            "end_date": END_DATE,
-            "daily": ",".join(DAILY_VARS),
-            "timezone": "Asia/Kolkata",
-            "models": "era5",
-        }
+    for i in range(0, len(todo), batch_size):
+        batch = todo[i : i + batch_size]
         print(f"[fetch batch] {i + 1}-{i + len(batch)}/{len(todo)} ({len(batch)} cells) ...")
-        data = fetch_with_retry(params)
-        if data is None:
-            print(f"[error] batch {i // BATCH} gave up after retries")
-            continue
-        items = data if isinstance(data, list) else [data]
+        items = fetch_cells(batch)
         saved = sum(1 for item in items if save_cell(item))
-        print(f"[ok] saved {saved} cells from batch")
-        time.sleep(2)
+        print(f"[ok] saved {saved}/{len(batch)} cells from batch")
+        time.sleep(PAUSE_SECONDS)
 
     print("[done] ERA5 features downloaded.")
 

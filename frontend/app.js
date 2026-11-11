@@ -26,9 +26,6 @@ function liveHeuristic(f){
   return { score, why };
 }
 
-  applyResult(d);
-}
-
 function applyResult(d){
   if (typeof d.heavy_rain_threshold_mm === "number") window.HEAVY_MM = d.heavy_rain_threshold_mm;
   document.getElementById("risk").textContent = d.risk_level + " RISK";
